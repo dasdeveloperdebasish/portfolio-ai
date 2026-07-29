@@ -16,7 +16,7 @@ export default function ChatWidget() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -26,7 +26,6 @@ export default function ChatWidget() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // lock body scroll while the fullscreen chat is open on mobile
   useEffect(() => {
     if (open && isMobile) {
       document.body.style.overflow = "hidden";
@@ -38,27 +37,22 @@ export default function ChatWidget() {
     };
   }, [open, isMobile]);
 
-  const scrollToBottom = () =>
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  function scrollToBottom() {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }
 
   useEffect(() => {
-    scrollToBottom();
+    const t = setTimeout(scrollToBottom, 60);
+    return () => clearTimeout(t);
   }, [msgs, loading, open]);
 
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 110) + "px";
+    ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
   }, [input]);
-
-  useEffect(() => {
-    if (open)
-      setTimeout(() => {
-        taRef.current?.focus();
-        scrollToBottom();
-      }, 150);
-  }, [open]);
 
   async function send() {
     const text = input.trim();
@@ -112,7 +106,7 @@ export default function ChatWidget() {
     setTimeout(() => {
       taRef.current?.focus();
       scrollToBottom();
-    }, 50);
+    }, 60);
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -121,25 +115,6 @@ export default function ChatWidget() {
       send();
     }
   }
-
-  // dvh = dynamic viewport height, shrinks when mobile keyboard opens,
-  // so the input never hides behind the keyboard.
-  const panelStyle: React.CSSProperties = isMobile
-    ? {
-        position: "fixed",
-        inset: 0,
-        width: "100%",
-        height: "100dvh",
-        borderRadius: 0,
-      }
-    : {
-        position: "fixed",
-        bottom: 24,
-        right: 24,
-        width: "min(380px, calc(100vw - 32px))",
-        height: "min(560px, calc(100vh - 90px))",
-        borderRadius: 18,
-      };
 
   return (
     <>
@@ -172,37 +147,22 @@ export default function ChatWidget() {
 
       {open && (
         <div
-          style={{
-            ...panelStyle,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            zIndex: 1000,
-            background: "#141418",
-            border: isMobile ? "none" : "1px solid rgba(255,255,255,0.1)",
-            boxShadow: "0 20px 60px rgba(0,0,0,.5)",
-            animation: "chatIn .22s ease",
-          }}
+          className={isMobile ? "cw-panel cw-mobile" : "cw-panel cw-desktop"}
         >
-          <style>{`@keyframes chatIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-          .chat-scroll::-webkit-scrollbar{width:4px}.chat-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
-          @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}`}</style>
+          <style>{`
+            .cw-panel{position:fixed;z-index:1000;display:flex;flex-direction:column;background:#141418;overflow:hidden}
+            .cw-desktop{bottom:24px;right:24px;width:min(380px,calc(100vw - 32px));height:min(560px,calc(100vh - 90px));border-radius:18px;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+            .cw-mobile{top:0;left:0;right:0;bottom:0;height:100dvh;border-radius:0}
+            .cw-head{flex:0 0 auto;background:${A};color:#0d0d0f;display:flex;align-items:center;gap:10px;padding:14px 16px}
+            .cw-mobile .cw-head{padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
+            .cw-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px}
+            .cw-body::-webkit-scrollbar{width:4px}.cw-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
+            .cw-foot{flex:0 0 auto;display:flex;gap:8px;align-items:flex-end;padding:10px;background:rgba(255,255,255,.04);border-top:1px solid rgba(255,255,255,.06)}
+            .cw-mobile .cw-foot{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
+            @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+          `}</style>
 
-          {/* Sticky header */}
-          <div
-            style={{
-              position: "sticky",
-              top: 0,
-              padding: "14px 16px",
-              background: A,
-              color: "#0d0d0f",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              flexShrink: 0,
-              zIndex: 2,
-            }}
-          >
+          <div className="cw-head">
             <div
               style={{
                 width: 34,
@@ -219,13 +179,11 @@ export default function ChatWidget() {
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2 }}>
                 Debasish&apos;s Assistant
               </div>
-              <div style={{ fontSize: 11, opacity: 0.75 }}>
-                ● online · replies instantly
-              </div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>● online</div>
             </div>
             <button
               onClick={() => setOpen(false)}
@@ -234,9 +192,9 @@ export default function ChatWidget() {
                 background: "transparent",
                 border: "none",
                 color: "#0d0d0f",
-                fontSize: 22,
+                fontSize: 24,
                 cursor: "pointer",
-                padding: 4,
+                padding: "4px 6px",
                 lineHeight: 1,
               }}
             >
@@ -244,19 +202,7 @@ export default function ChatWidget() {
             </button>
           </div>
 
-          {/* Scrollable messages - min-height:0 is the key so it scrolls inside flex */}
-          <div
-            className="chat-scroll"
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              padding: 14,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
+          <div ref={scrollRef} className="cw-body">
             {msgs.map((m, i) => (
               <div
                 key={i}
@@ -319,31 +265,20 @@ export default function ChatWidget() {
                 />
               </div>
             )}
-            <div ref={bottomRef} />
           </div>
 
-          {/* Input - stays pinned at bottom */}
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              padding: 10,
-              background: "rgba(255,255,255,0.03)",
-              alignItems: "flex-end",
-              flexShrink: 0,
-            }}
-          >
+          <div className="cw-foot">
             <textarea
               ref={taRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
-              onFocus={() => setTimeout(scrollToBottom, 300)}
+              onFocus={() => setTimeout(scrollToBottom, 350)}
               placeholder="Type a message"
               rows={1}
               style={{
                 flex: 1,
-                borderRadius: 18,
+                borderRadius: 20,
                 border: "1px solid rgba(255,255,255,0.15)",
                 background: "#0d0d0f",
                 color: "#fff",
@@ -351,7 +286,7 @@ export default function ChatWidget() {
                 fontSize: 16,
                 outline: "none",
                 resize: "none",
-                maxHeight: 110,
+                maxHeight: 100,
                 overflowY: "auto",
                 fontFamily: "inherit",
                 lineHeight: 1.4,
