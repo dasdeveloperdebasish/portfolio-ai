@@ -26,8 +26,23 @@ export default function ChatWidget() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  // lock body scroll while the fullscreen chat is open on mobile
   useEffect(() => {
+    if (open && isMobile) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open, isMobile]);
+
+  const scrollToBottom = () =>
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  useEffect(() => {
+    scrollToBottom();
   }, [msgs, loading, open]);
 
   useEffect(() => {
@@ -38,7 +53,11 @@ export default function ChatWidget() {
   }, [input]);
 
   useEffect(() => {
-    if (open) setTimeout(() => taRef.current?.focus(), 100);
+    if (open)
+      setTimeout(() => {
+        taRef.current?.focus();
+        scrollToBottom();
+      }, 150);
   }, [open]);
 
   async function send() {
@@ -90,7 +109,10 @@ export default function ChatWidget() {
     }
 
     setLoading(false);
-    setTimeout(() => taRef.current?.focus(), 50);
+    setTimeout(() => {
+      taRef.current?.focus();
+      scrollToBottom();
+    }, 50);
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -100,12 +122,14 @@ export default function ChatWidget() {
     }
   }
 
+  // dvh = dynamic viewport height, shrinks when mobile keyboard opens,
+  // so the input never hides behind the keyboard.
   const panelStyle: React.CSSProperties = isMobile
     ? {
         position: "fixed",
         inset: 0,
         width: "100%",
-        height: "100%",
+        height: "100dvh",
         borderRadius: 0,
       }
     : {
@@ -119,7 +143,6 @@ export default function ChatWidget() {
 
   return (
     <>
-      {/* Floating bubble - ONLY when chat is closed */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
@@ -165,9 +188,11 @@ export default function ChatWidget() {
           .chat-scroll::-webkit-scrollbar{width:4px}.chat-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
           @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}`}</style>
 
-          {/* Header with close X (always shown) */}
+          {/* Sticky header */}
           <div
             style={{
+              position: "sticky",
+              top: 0,
               padding: "14px 16px",
               background: A,
               color: "#0d0d0f",
@@ -175,6 +200,7 @@ export default function ChatWidget() {
               alignItems: "center",
               gap: 10,
               flexShrink: 0,
+              zIndex: 2,
             }}
           >
             <div
@@ -218,11 +244,12 @@ export default function ChatWidget() {
             </button>
           </div>
 
-          {/* Messages */}
+          {/* Scrollable messages - min-height:0 is the key so it scrolls inside flex */}
           <div
             className="chat-scroll"
             style={{
               flex: 1,
+              minHeight: 0,
               overflowY: "auto",
               padding: 14,
               display: "flex",
@@ -295,7 +322,7 @@ export default function ChatWidget() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
+          {/* Input - stays pinned at bottom */}
           <div
             style={{
               display: "flex",
@@ -311,6 +338,7 @@ export default function ChatWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
+              onFocus={() => setTimeout(scrollToBottom, 300)}
               placeholder="Type a message"
               rows={1}
               style={{
