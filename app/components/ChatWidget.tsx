@@ -7,6 +7,7 @@ const A = PROFILE.accent;
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       role: "bot",
@@ -19,10 +20,16 @@ export default function ChatWidget() {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading, open]);
 
-  // auto-grow the textarea up to a max height
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
@@ -30,7 +37,6 @@ export default function ChatWidget() {
     ta.style.height = Math.min(ta.scrollHeight, 110) + "px";
   }, [input]);
 
-  // focus the input when the chat opens
   useEffect(() => {
     if (open) setTimeout(() => taRef.current?.focus(), 100);
   }, [open]);
@@ -41,9 +47,12 @@ export default function ChatWidget() {
     setInput("");
     setMsgs((m) => [...m, { role: "user", text }]);
     setLoading(true);
+    taRef.current?.focus();
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
           history: msgs.map((m) => ({
@@ -52,15 +61,36 @@ export default function ChatWidget() {
           })),
         }),
       });
-      const data = await res.json();
-      setMsgs((m) => [...m, { role: "bot", text: data.reply }]);
+      if (!res.ok) {
+        setMsgs((m) => [
+          ...m,
+          {
+            role: "bot",
+            text: `Sorry, I hit a limit for a moment. Please try again, or email ${PROFILE.email}.`,
+          },
+        ]);
+      } else {
+        const data = await res.json();
+        const reply = data?.reply?.trim();
+        setMsgs((m) => [
+          ...m,
+          {
+            role: "bot",
+            text:
+              reply ||
+              `Sorry, I didn't catch that. Try again, or email ${PROFILE.email}.`,
+          },
+        ]);
+      }
     } catch {
       setMsgs((m) => [
         ...m,
-        { role: "bot", text: `Network error. Email ${PROFILE.email}.` },
+        { role: "bot", text: `Network issue. Please email ${PROFILE.email}.` },
       ]);
     }
+
     setLoading(false);
+    setTimeout(() => taRef.current?.focus(), 50);
   }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -70,59 +100,72 @@ export default function ChatWidget() {
     }
   }
 
+  const panelStyle: React.CSSProperties = isMobile
+    ? {
+        position: "fixed",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        borderRadius: 0,
+      }
+    : {
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        width: "min(380px, calc(100vw - 32px))",
+        height: "min(560px, calc(100vh - 90px))",
+        borderRadius: 18,
+      };
+
   return (
     <>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-label={open ? "Close chat" : "Open chat"}
-        style={{
-          position: "fixed",
-          bottom: 24,
-          right: 24,
-          width: 58,
-          height: 58,
-          borderRadius: "50%",
-          border: "none",
-          cursor: "pointer",
-          zIndex: 1000,
-          background: A,
-          color: "#0d0d0f",
-          fontSize: 24,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: `0 8px 28px ${A}66`,
-          transition: "transform .2s",
-        }}
-        onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.94)")}
-        onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
-        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-      >
-        {open ? "\u2715" : "\uD83D\uDCAC"}
-      </button>
+      {/* Floating bubble - ONLY when chat is closed */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open chat"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            width: 58,
+            height: 58,
+            borderRadius: "50%",
+            border: "none",
+            cursor: "pointer",
+            zIndex: 1001,
+            background: A,
+            color: "#0d0d0f",
+            fontSize: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: `0 8px 28px ${A}66`,
+          }}
+        >
+          {"\uD83D\uDCAC"}
+        </button>
+      )}
 
       {open && (
         <div
           style={{
-            position: "fixed",
-            bottom: 96,
-            right: 24,
-            width: "min(370px, calc(100vw - 32px))",
-            height: "min(540px, calc(100vh - 140px))",
+            ...panelStyle,
             display: "flex",
             flexDirection: "column",
-            borderRadius: 18,
             overflow: "hidden",
             zIndex: 1000,
             background: "#141418",
-            border: "1px solid rgba(255,255,255,0.1)",
+            border: isMobile ? "none" : "1px solid rgba(255,255,255,0.1)",
             boxShadow: "0 20px 60px rgba(0,0,0,.5)",
             animation: "chatIn .22s ease",
           }}
         >
           <style>{`@keyframes chatIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-          .chat-scroll::-webkit-scrollbar{width:4px}.chat-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}`}</style>
+          .chat-scroll::-webkit-scrollbar{width:4px}.chat-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
+          @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}`}</style>
 
+          {/* Header with close X (always shown) */}
           <div
             style={{
               padding: "14px 16px",
@@ -131,6 +174,7 @@ export default function ChatWidget() {
               display: "flex",
               alignItems: "center",
               gap: 10,
+              flexShrink: 0,
             }}
           >
             <div
@@ -149,7 +193,7 @@ export default function ChatWidget() {
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             </div>
-            <div>
+            <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.1 }}>
                 Debasish&apos;s Assistant
               </div>
@@ -157,8 +201,24 @@ export default function ChatWidget() {
                 ● online · replies instantly
               </div>
             </div>
+            <button
+              onClick={() => setOpen(false)}
+              aria-label="Close chat"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#0d0d0f",
+                fontSize: 22,
+                cursor: "pointer",
+                padding: 4,
+                lineHeight: 1,
+              }}
+            >
+              {"\u2715"}
+            </button>
           </div>
 
+          {/* Messages */}
           <div
             className="chat-scroll"
             style={{
@@ -204,41 +264,38 @@ export default function ChatWidget() {
                 }}
               >
                 <span
-                  className="dot"
                   style={{
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
                     background: "#888",
-                    animation: "b 1s infinite",
+                    animation: "bnc 1s infinite",
                   }}
                 />
                 <span
-                  className="dot"
                   style={{
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
                     background: "#888",
-                    animation: "b 1s infinite .15s",
+                    animation: "bnc 1s infinite .15s",
                   }}
                 />
                 <span
-                  className="dot"
                   style={{
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
                     background: "#888",
-                    animation: "b 1s infinite .3s",
+                    animation: "bnc 1s infinite .3s",
                   }}
                 />
-                <style>{`@keyframes b{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}`}</style>
               </div>
             )}
             <div ref={bottomRef} />
           </div>
 
+          {/* Input */}
           <div
             style={{
               display: "flex",
@@ -246,6 +303,7 @@ export default function ChatWidget() {
               padding: 10,
               background: "rgba(255,255,255,0.03)",
               alignItems: "flex-end",
+              flexShrink: 0,
             }}
           >
             <textarea
@@ -262,7 +320,7 @@ export default function ChatWidget() {
                 background: "#0d0d0f",
                 color: "#fff",
                 padding: "10px 14px",
-                fontSize: 14,
+                fontSize: 16,
                 outline: "none",
                 resize: "none",
                 maxHeight: 110,
@@ -274,10 +332,10 @@ export default function ChatWidget() {
             <button
               onClick={send}
               disabled={!input.trim() || loading}
-              aria-label="Send message"
+              aria-label="Send"
               style={{
-                width: 40,
-                height: 40,
+                width: 42,
+                height: 42,
                 borderRadius: "50%",
                 border: "none",
                 cursor: input.trim() && !loading ? "pointer" : "default",
@@ -286,7 +344,6 @@ export default function ChatWidget() {
                 color: "#0d0d0f",
                 flexShrink: 0,
                 fontSize: 16,
-                transition: "background .2s",
               }}
             >
               {"\u27A4"}
