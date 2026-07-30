@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { PROFILE } from "@/lib/content";
 
 type Msg = { role: "user" | "bot"; text: string };
@@ -8,10 +8,11 @@ const A = PROFILE.accent;
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [kb, setKb] = useState(0); // keyboard height, mobile only
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       role: "bot",
-      text: "Hi! I'm Debasish's assistant. Want to automate your business, build an app, or hire him? Ask me anything.",
+      text: "Hi! I'm Debasish's assistant. Want to automate your business, build an app, or hire him?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -26,32 +27,63 @@ export default function ChatWidget() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  // FIX 3: measure the keyboard and lift ONLY the input bar by that amount.
+  // The chat panel itself never moves, so messages stay where they are.
   useEffect(() => {
-    if (open && isMobile) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
+    if (!open || !isMobile) {
+      setKb(0);
+      return;
     }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const hidden = window.innerHeight - vv.height - vv.offsetTop;
+      setKb(hidden > 60 ? hidden : 0); // >60px means keyboard is up
+    };
+    onResize();
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
     return () => {
-      document.body.style.overflow = "";
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
     };
   }, [open, isMobile]);
 
-  function scrollToBottom() {
+  // FIX 4: only lock the body while chat is open; restore scroll position after.
+  useEffect(() => {
+    if (open && isMobile) {
+      const y = window.scrollY;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = "";
+        window.scrollTo(0, y); // put the page back where it was
+      };
+    }
+  }, [open, isMobile]);
+
+  // FIX 4: scroll only the chat container, never the page.
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }
+  }, []);
 
+  // only auto-scroll the chat when it is actually open
   useEffect(() => {
+    if (!open) return;
     const t = setTimeout(scrollToBottom, 60);
     return () => clearTimeout(t);
-  }, [msgs, loading, open]);
+  }, [msgs, loading, open, scrollToBottom]);
+
+  // keep newest message visible when keyboard opens/closes
+  useEffect(() => {
+    if (open) setTimeout(scrollToBottom, 120);
+  }, [kb, open, scrollToBottom]);
 
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
+    ta.style.height = Math.min(ta.scrollHeight, 96) + "px";
   }, [input]);
 
   async function send() {
@@ -60,7 +92,7 @@ export default function ChatWidget() {
     setInput("");
     setMsgs((m) => [...m, { role: "user", text }]);
     setLoading(true);
-    taRef.current?.focus();
+    taRef.current?.focus(); // keyboard stays open
 
     try {
       const res = await fetch("/api/chat", {
@@ -79,7 +111,7 @@ export default function ChatWidget() {
           ...m,
           {
             role: "bot",
-            text: `Sorry, I hit a limit for a moment. Please try again, or email ${PROFILE.email}.`,
+            text: `Sorry, try again in a moment — or email ${PROFILE.email}.`,
           },
         ]);
       } else {
@@ -89,9 +121,7 @@ export default function ChatWidget() {
           ...m,
           {
             role: "bot",
-            text:
-              reply ||
-              `Sorry, I didn't catch that. Try again, or email ${PROFILE.email}.`,
+            text: reply || `Sorry, didn't catch that. Try again?`,
           },
         ]);
       }
@@ -146,19 +176,16 @@ export default function ChatWidget() {
       )}
 
       {open && (
-        <div
-          className={isMobile ? "cw-panel cw-mobile" : "cw-panel cw-desktop"}
-        >
+        <div className={isMobile ? "cw cw-m" : "cw cw-d"}>
           <style>{`
-            .cw-panel{position:fixed;z-index:1000;display:flex;flex-direction:column;background:#141418;overflow:hidden}
-            .cw-desktop{bottom:24px;right:24px;width:min(380px,calc(100vw - 32px));height:min(560px,calc(100vh - 90px));border-radius:18px;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.5)}
-            .cw-mobile{top:0;left:0;right:0;bottom:0;height:100dvh;border-radius:0}
+            .cw{position:fixed;z-index:1000;display:flex;flex-direction:column;background:#141418;overflow:hidden}
+            .cw-d{bottom:24px;right:24px;width:min(380px,calc(100vw - 32px));height:min(560px,calc(100vh - 90px));border-radius:18px;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+            .cw-m{top:0;left:0;right:0;bottom:0;border-radius:0}
             .cw-head{flex:0 0 auto;background:${A};color:#0d0d0f;display:flex;align-items:center;gap:10px;padding:14px 16px}
-            .cw-mobile .cw-head{padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
-            .cw-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px}
+            .cw-m .cw-head{padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
+            .cw-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
             .cw-body::-webkit-scrollbar{width:4px}.cw-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
-            .cw-foot{flex:0 0 auto;display:flex;gap:8px;align-items:flex-end;padding:10px;background:rgba(255,255,255,.04);border-top:1px solid rgba(255,255,255,.06)}
-            .cw-mobile .cw-foot{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
+            .cw-foot{flex:0 0 auto;display:flex;gap:8px;align-items:flex-end;padding:10px;background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.07);transition:margin-bottom .18s ease}
             @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
           `}</style>
 
@@ -267,13 +294,22 @@ export default function ChatWidget() {
             )}
           </div>
 
-          <div className="cw-foot">
+          {/* only this bar lifts with the keyboard */}
+          <div
+            className="cw-foot"
+            style={{
+              marginBottom: isMobile ? kb : 0,
+              paddingBottom:
+                isMobile && kb === 0
+                  ? "calc(env(safe-area-inset-bottom,0px) + 10px)"
+                  : 10,
+            }}
+          >
             <textarea
               ref={taRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKey}
-              onFocus={() => setTimeout(scrollToBottom, 350)}
               placeholder="Type a message"
               rows={1}
               style={{
@@ -286,7 +322,7 @@ export default function ChatWidget() {
                 fontSize: 16,
                 outline: "none",
                 resize: "none",
-                maxHeight: 100,
+                maxHeight: 96,
                 overflowY: "auto",
                 fontFamily: "inherit",
                 lineHeight: 1.4,
