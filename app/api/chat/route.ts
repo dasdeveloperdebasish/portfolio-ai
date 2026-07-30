@@ -3,17 +3,19 @@ import { SYSTEM } from "@/lib/prompt";
 
 export const runtime = "edge";
 
-const MODEL = "openai/gpt-oss-120b"; // best reasoning
-const WHATSAPP = "https://wa.me/917044200115";
+const MODEL = "openai/gpt-oss-120b";
 const PHONE = "+91 70442 00115";
+const WA = "https://wa.me/917044200115";
 const EMAIL = "dasdeveloperdebasish@gmail.com";
 
-const BUSY_REPLY = `I'm getting a lot of messages right now 🙏 Please reach Debasish directly — WhatsApp ${PHONE} (${WHATSAPP}) or email ${EMAIL}. He replies fast!`;
+const BUSY_REPLY = `I'm getting a lot of messages right now 🙏 Please reach Debasish directly — WhatsApp ${PHONE} (${WA}) or email ${EMAIL}. He replies fast!`;
+
+// used only if the model returns literally nothing
+const EMPTY_REPLY = `You can reach Debasish on WhatsApp ${PHONE} or email ${EMAIL} 🙂`;
 
 async function saveLead(reply: string) {
   const match = reply.match(/LEAD_JSON:\s*(\{[\s\S]*?\})/);
   if (!match) return;
-
   try {
     const lead = JSON.parse(match[1]);
     const contact = String(lead.contact || "").trim();
@@ -21,7 +23,6 @@ async function saveLead(reply: string) {
     const phone = contact.replace(/\D/g, "").slice(-10);
     const isPhone = /^[6-9]\d{9}$/.test(phone);
     const nameOk = /^[A-Za-z][A-Za-z\s.']{1,}$/.test(lead.name || "");
-
     if (nameOk && (isEmail || isPhone)) {
       console.log("[lead] saving:", lead);
       if (process.env.SHEET_URL) {
@@ -29,10 +30,10 @@ async function saveLead(reply: string) {
           method: "POST",
           body: JSON.stringify(lead),
         });
-        console.log("[lead] sheet response:", await r.text());
+        console.log("[lead] sheet:", await r.text());
       }
     } else {
-      console.log("[lead] invalid, not saved:", lead);
+      console.log("[lead] invalid:", lead);
     }
   } catch (e) {
     console.log("[lead] parse failed", e);
@@ -48,14 +49,11 @@ export async function POST(req: Request) {
     message = body.message ?? "";
     history = Array.isArray(body.history) ? body.history.slice(-20) : [];
   } catch {
-    return Response.json({
-      reply: "Sorry, something went wrong. Please try again.",
-    });
+    return Response.json({ reply: EMPTY_REPLY });
   }
 
-  if (!message.trim()) {
-    return Response.json({ reply: "Please type a message." });
-  }
+  if (!message.trim())
+    return Response.json({ reply: "Go ahead, I'm listening 🙂" });
 
   const messages = [
     { role: "system", content: SYSTEM },
@@ -71,14 +69,19 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${PROVIDER.key}`,
       },
-      body: JSON.stringify({ model: MODEL, temperature: 0.4, messages }),
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.6, // a bit more variety, less repetition
+        frequency_penalty: 0.6, // discourages repeating the same lines
+        presence_penalty: 0.3,
+        messages,
+      }),
     });
   } catch (e) {
     console.error("[groq] network error", e);
     return Response.json({ reply: BUSY_REPLY });
   }
 
-  // quota / rate limit used up -> send them straight to WhatsApp or email
   if (res.status === 429) {
     console.log("[groq] rate limited");
     return Response.json({ reply: BUSY_REPLY });
@@ -90,12 +93,13 @@ export async function POST(req: Request) {
   }
 
   const data = await res.json();
-  let reply =
-    data?.choices?.[0]?.message?.content?.trim() ||
-    "Sorry, I didn't quite catch that — could you say it again?";
+  let reply = data?.choices?.[0]?.message?.content?.trim() || "";
 
   await saveLead(reply);
   reply = reply.replace(/LEAD_JSON:[\s\S]*$/m, "").trim();
+
+  // never show a confusion message - fall back to contact details instead
+  if (!reply) reply = EMPTY_REPLY;
 
   return Response.json({ reply });
 }
