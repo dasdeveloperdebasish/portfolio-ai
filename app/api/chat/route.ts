@@ -3,38 +3,12 @@ import { SYSTEM } from "@/lib/prompt";
 
 export const runtime = "edge";
 
-// Tried in order. Each model has its own daily quota, so if the first
-// is exhausted (429), we automatically fall back to the next.
-const MODELS = [
-  "openai/gpt-oss-120b", // strongest reasoning
-  "llama-3.3-70b-versatile", // strong fallback, separate quota
-];
-async function callGroq(messages: unknown[]): Promise<Response | null> {
-  for (const model of MODELS) {
-    try {
-      const res = await fetch(PROVIDER.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${PROVIDER.key}`,
-        },
-        body: JSON.stringify({ model, temperature: 0.4, messages }),
-      });
+const MODEL = "openai/gpt-oss-120b"; // best reasoning
+const WHATSAPP = "https://wa.me/917044200115";
+const PHONE = "+91 70442 00115";
+const EMAIL = "dasdeveloperdebasish@gmail.com";
 
-      // rate-limited on this model -> try the next one
-      if (res.status === 429) {
-        console.log(`[groq] ${model} rate-limited, trying next model`);
-        continue;
-      }
-      // any other response (success or a real error) -> return it
-      return res;
-    } catch (e) {
-      console.error(`[groq] ${model} network error`, e);
-      continue; // try next model on network hiccup
-    }
-  }
-  return null; // every model exhausted
-}
+const BUSY_REPLY = `I'm getting a lot of messages right now 🙏 Please reach Debasish directly — WhatsApp ${PHONE} (${WHATSAPP}) or email ${EMAIL}. He replies fast!`;
 
 async function saveLead(reply: string) {
   const match = reply.match(/LEAD_JSON:\s*(\{[\s\S]*?\})/);
@@ -68,6 +42,7 @@ async function saveLead(reply: string) {
 export async function POST(req: Request) {
   let message = "";
   let history: unknown[] = [];
+
   try {
     const body = await req.json();
     message = body.message ?? "";
@@ -88,30 +63,37 @@ export async function POST(req: Request) {
     { role: "user", content: message },
   ];
 
-  const res = await callGroq(messages);
-
-  // all models exhausted or unreachable
-  if (!res) {
-    return Response.json({
-      reply:
-        "I'm getting a lot of messages right now. Please email Debasish at dasdeveloperdebasish@gmail.com and he'll reply fast.",
+  let res: Response;
+  try {
+    res = await fetch(PROVIDER.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PROVIDER.key}`,
+      },
+      body: JSON.stringify({ model: MODEL, temperature: 0.4, messages }),
     });
+  } catch (e) {
+    console.error("[groq] network error", e);
+    return Response.json({ reply: BUSY_REPLY });
+  }
+
+  // quota / rate limit used up -> send them straight to WhatsApp or email
+  if (res.status === 429) {
+    console.log("[groq] rate limited");
+    return Response.json({ reply: BUSY_REPLY });
   }
 
   if (!res.ok) {
     console.error("[groq] error", res.status, await res.text());
-    return Response.json({
-      reply:
-        "Sorry, I couldn't reply just now. Please email dasdeveloperdebasish@gmail.com.",
-    });
+    return Response.json({ reply: BUSY_REPLY });
   }
 
   const data = await res.json();
   let reply =
     data?.choices?.[0]?.message?.content?.trim() ||
-    "Sorry, I didn't catch that — could you rephrase? Or email dasdeveloperdebasish@gmail.com.";
+    "Sorry, I didn't quite catch that — could you say it again?";
 
-  // capture lead (if any) then strip the JSON line before replying
   await saveLead(reply);
   reply = reply.replace(/LEAD_JSON:[\s\S]*$/m, "").trim();
 

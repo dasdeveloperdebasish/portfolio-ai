@@ -8,11 +8,12 @@ const A = PROFILE.accent;
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [kb, setKb] = useState(0); // keyboard height, mobile only
+  // exact visible box, so the panel never gets pushed off-screen by the keyboard
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       role: "bot",
-      text: "Hi! I'm Debasish's assistant. Want to automate your business, build an app, or hire him?",
+      text: "Hey! I'm Debasish's assistant 👋 How can I help you today?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -27,57 +28,53 @@ export default function ChatWidget() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // FIX 3: measure the keyboard and lift ONLY the input bar by that amount.
-  // The chat panel itself never moves, so messages stay where they are.
+  // Pin the panel to the real visible area (shrinks/moves when keyboard opens)
   useEffect(() => {
     if (!open || !isMobile) {
-      setKb(0);
+      setBox(null);
       return;
     }
     const vv = window.visualViewport;
     if (!vv) return;
-    const onResize = () => {
-      const hidden = window.innerHeight - vv.height - vv.offsetTop;
-      setKb(hidden > 60 ? hidden : 0); // >60px means keyboard is up
+
+    const update = () => {
+      setBox({ top: vv.offsetTop, height: vv.height });
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
     };
-    onResize();
-    vv.addEventListener("resize", onResize);
-    vv.addEventListener("scroll", onResize);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
     return () => {
-      vv.removeEventListener("resize", onResize);
-      vv.removeEventListener("scroll", onResize);
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
     };
   }, [open, isMobile]);
 
-  // FIX 4: only lock the body while chat is open; restore scroll position after.
+  // lock page behind chat, restore scroll on close
   useEffect(() => {
     if (open && isMobile) {
       const y = window.scrollY;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = "";
-        window.scrollTo(0, y); // put the page back where it was
+        window.scrollTo(0, y);
       };
     }
   }, [open, isMobile]);
 
-  // FIX 4: scroll only the chat container, never the page.
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
-  // only auto-scroll the chat when it is actually open
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(scrollToBottom, 60);
     return () => clearTimeout(t);
   }, [msgs, loading, open, scrollToBottom]);
-
-  // keep newest message visible when keyboard opens/closes
-  useEffect(() => {
-    if (open) setTimeout(scrollToBottom, 120);
-  }, [kb, open, scrollToBottom]);
 
   useEffect(() => {
     const ta = taRef.current;
@@ -92,7 +89,7 @@ export default function ChatWidget() {
     setInput("");
     setMsgs((m) => [...m, { role: "user", text }]);
     setLoading(true);
-    taRef.current?.focus(); // keyboard stays open
+    taRef.current?.focus();
 
     try {
       const res = await fetch("/api/chat", {
@@ -121,7 +118,7 @@ export default function ChatWidget() {
           ...m,
           {
             role: "bot",
-            text: reply || `Sorry, didn't catch that. Try again?`,
+            text: reply || "Sorry, didn't catch that. Could you say it again?",
           },
         ]);
       }
@@ -145,6 +142,27 @@ export default function ChatWidget() {
       send();
     }
   }
+
+  // mobile: exact pinned box. desktop: floating card.
+  const panelStyle: React.CSSProperties = isMobile
+    ? {
+        position: "fixed",
+        top: box ? box.top : 0,
+        left: 0,
+        right: 0,
+        height: box ? box.height : "100dvh",
+        borderRadius: 0,
+      }
+    : {
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        width: "min(380px, calc(100vw - 32px))",
+        height: "min(560px, calc(100vh - 90px))",
+        borderRadius: 18,
+        border: "1px solid rgba(255,255,255,.1)",
+        boxShadow: "0 20px 60px rgba(0,0,0,.5)",
+      };
 
   return (
     <>
@@ -176,20 +194,33 @@ export default function ChatWidget() {
       )}
 
       {open && (
-        <div className={isMobile ? "cw cw-m" : "cw cw-d"}>
+        <div
+          style={{
+            ...panelStyle,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            background: "#141418",
+            overflow: "hidden",
+          }}
+        >
           <style>{`
-            .cw{position:fixed;z-index:1000;display:flex;flex-direction:column;background:#141418;overflow:hidden}
-            .cw-d{bottom:24px;right:24px;width:min(380px,calc(100vw - 32px));height:min(560px,calc(100vh - 90px));border-radius:18px;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.5)}
-            .cw-m{top:0;left:0;right:0;bottom:0;border-radius:0}
-            .cw-head{flex:0 0 auto;background:${A};color:#0d0d0f;display:flex;align-items:center;gap:10px;padding:14px 16px}
-            .cw-m .cw-head{padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
-            .cw-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
-            .cw-body::-webkit-scrollbar{width:4px}.cw-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
-            .cw-foot{flex:0 0 auto;display:flex;gap:8px;align-items:flex-end;padding:10px;background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.07);transition:margin-bottom .18s ease}
+            .cwb::-webkit-scrollbar{width:4px}.cwb::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:9px}
             @keyframes bnc{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
           `}</style>
 
-          <div className="cw-head">
+          {/* header - fixed height, always visible */}
+          <div
+            style={{
+              flex: "0 0 auto",
+              background: A,
+              color: "#0d0d0f",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "12px 14px",
+            }}
+          >
             <div
               style={{
                 width: 34,
@@ -229,7 +260,22 @@ export default function ChatWidget() {
             </button>
           </div>
 
-          <div ref={scrollRef} className="cw-body">
+          {/* messages */}
+          <div
+            ref={scrollRef}
+            className="cwb"
+            style={{
+              flex: "1 1 auto",
+              minHeight: 0,
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              padding: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
             {msgs.map((m, i) => (
               <div
                 key={i}
@@ -294,15 +340,16 @@ export default function ChatWidget() {
             )}
           </div>
 
-          {/* only this bar lifts with the keyboard */}
+          {/* input */}
           <div
-            className="cw-foot"
             style={{
-              marginBottom: isMobile ? kb : 0,
-              paddingBottom:
-                isMobile && kb === 0
-                  ? "calc(env(safe-area-inset-bottom,0px) + 10px)"
-                  : 10,
+              flex: "0 0 auto",
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-end",
+              padding: 10,
+              background: "rgba(255,255,255,.05)",
+              borderTop: "1px solid rgba(255,255,255,.07)",
             }}
           >
             <textarea
